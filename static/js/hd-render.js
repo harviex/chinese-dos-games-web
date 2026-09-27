@@ -14,18 +14,18 @@
 
   var PRESETS = {
     off:   { label: '关闭',   curvature: 0,     scanline: 0,     vignette: 0,    chroma: 0,      sharpen: 0,    glow: 0,    saturation: 1,    contrast: 1,     brightness: 0 },
-    hd:    { label: '纯净HD', curvature: 0,     scanline: 0,     vignette: 0,    chroma: 0,      sharpen: 0.55, glow: 0.10, saturation: 1.06, contrast: 1.05,  brightness: 0.01, fsr: 0.85, scaleMode: 1, intScale: 2 },
-    crt:   { label: 'CRT',    curvature: 0.055, scanline: 0.14,  vignette: 0.28, chroma: 0.0016, sharpen: 0.30, glow: 0.28, saturation: 1.14, contrast: 1.08,  brightness: 0.02, fsr: 0.75, scaleMode: 1, intScale: 2 },
-    crt_hi:{ label: '重CRT',  curvature: 0.090, scanline: 0.22,  vignette: 0.42, chroma: 0.0030, sharpen: 0.20, glow: 0.42, saturation: 1.22, contrast: 1.14,  brightness: 0.03, fsr: 0.60, scaleMode: 1, intScale: 2 },
-    clean: { label: '柔和',   curvature: 0.025, scanline: 0.06,  vignette: 0.15, chroma: 0.0006, sharpen: 0.40, glow: 0.18, saturation: 1.10, contrast: 1.03,  brightness: 0.01, fsr: 0.90, scaleMode: 1, intScale: 2 },
-    fsr_max:{ label: '极限FSR', curvature: 0,     scanline: 0,     vignette: 0,    chroma: 0,      sharpen: 0.35, glow: 0.05, saturation: 1.04, contrast: 1.03,  brightness: 0.00, fsr: 1.00, scaleMode: 1, intScale: 3 }
+    hd:    { label: '纯净HD', curvature: 0,     scanline: 0,     vignette: 0,    chroma: 0,      sharpen: 0.25, glow: 0.06, saturation: 1.05, contrast: 1.04,  brightness: 0.01, fsr: 1, advmame: 1, scaleMode: 1, intScale: 3 },
+    crt:   { label: 'CRT',    curvature: 0.055, scanline: 0.14,  vignette: 0.28, chroma: 0.0016, sharpen: 0.30, glow: 0.28, saturation: 1.14, contrast: 1.08,  brightness: 0.02, fsr: 1, advmame: 1, scaleMode: 1, intScale: 2 },
+    crt_hi:{ label: '重CRT',  curvature: 0.090, scanline: 0.22,  vignette: 0.42, chroma: 0.0030, sharpen: 0.20, glow: 0.42, saturation: 1.22, contrast: 1.14,  brightness: 0.03, fsr: 1, advmame: 1, scaleMode: 1, intScale: 2 },
+    clean: { label: '柔和',   curvature: 0.025, scanline: 0.06,  vignette: 0.15, chroma: 0.0006, sharpen: 0.40, glow: 0.18, saturation: 1.10, contrast: 1.03,  brightness: 0.01, fsr: 1, advmame: 1, scaleMode: 1, intScale: 2 },
+    fsr_max:{ label: '像素重建', curvature: 0,   scanline: 0,     vignette: 0,    chroma: 0,      sharpen: 0.15, glow: 0.03, saturation: 1.03, contrast: 1.02,  brightness: 0.00, fsr: 1, advmame: 1, scaleMode: 1, intScale: 4 }
   };
 
-  var offPreset = { curvature: 0, scanline: 0, vignette: 0, chroma: 0, sharpen: 0, glow: 0, saturation: 1, contrast: 1, brightness: 0, fsr: 0, scaleMode: 0, intScale: 2 };
+  var offPreset = { curvature: 0, scanline: 0, vignette: 0, chroma: 0, sharpen: 0, glow: 0, saturation: 1, contrast: 1, brightness: 0, fsr: 0, advmame: 1, scaleMode: 0, intScale: 2 };
   PRESETS.off = { label: '关闭' };
   for (var _k in offPreset) { PRESETS.off[_k] = offPreset[_k]; }
 
-  var TUNABLE = ['curvature', 'scanline', 'vignette', 'chroma', 'sharpen', 'glow', 'saturation', 'contrast', 'brightness', 'fsr', 'scaleMode', 'intScale'];
+  var TUNABLE = ['curvature', 'scanline', 'vignette', 'chroma', 'sharpen', 'glow', 'saturation', 'contrast', 'brightness', 'fsr', 'advmame', 'scaleMode', 'intScale'];
 
   var VERT = [
     'attribute vec2 a_pos;',
@@ -53,55 +53,83 @@
     'uniform float u_brightness;',
     'uniform float u_curved;',
     'uniform float u_fsr;',           /* FSR 边缘自适应强度 0..1 */
+    'uniform float u_advmame;',        /* 0=Scale2x 1=AdvMAME2x */
     'uniform float u_srcW;',           /* 源纹理像素宽 */
     'uniform float u_srcH;',
     'uniform float u_scaleNow;',       /* 实际放大倍率 */
     '',
-    '/* 3x3 邻域采样，FSR 边缘方向推断用 */',
-    'void fetch3x3(vec2 uv, out vec3 c, out vec3 n, out vec3 s, out vec3 w, out vec3 e,',
-    '             out vec3 nw, out vec3 ne, out vec3 sw, out vec3 se) {',
-    '  c  = texture2D(u_tex, uv).rgb;',
-    '  n  = texture2D(u_tex, uv + vec2(0.0, -u_texel.y)).rgb;',
-    '  s  = texture2D(u_tex, uv + vec2(0.0,  u_texel.y)).rgb;',
-    '  w  = texture2D(u_tex, uv + vec2(-u_texel.x, 0.0)).rgb;',
-    '  e  = texture2D(u_tex, uv + vec2( u_texel.x, 0.0)).rgb;',
-    '  nw = texture2D(u_tex, uv + vec2(-u_texel.x, -u_texel.y)).rgb;',
-    '  ne = texture2D(u_tex, uv + vec2( u_texel.x, -u_texel.y)).rgb;',
-    '  sw = texture2D(u_tex, uv + vec2(-u_texel.x,  u_texel.y)).rgb;',
-    '  se = texture2D(u_tex, uv + vec2( u_texel.x,  u_texel.y)).rgb;',
+    '// ---- Scale2x / AdvMAME2x: pixel-art edge reconstruction, no blur ----',
+    '//',
+    '// Classic upscaling (bilinear, my old EASU) blends neighbouring pixels,',
+    '// which softens and blurs every edge. Scale2x never blends: for each of',
+    '// the 4 output sub-pixels it picks either the centre pixel or a',
+    '// neighbour whose colour matches, so diagonals become continuous lines',
+    '// and colour-block boundaries stay perfectly hard.',
+    '// This is exactly what isometric pixel art (sloped roofs, stairs,',
+    '// floorboards) needs.',
+    'void scale2xPixel(vec2 sp, out vec3 e0, out vec3 e1, out vec3 e2, out vec3 e3) {',
+    '  vec2 t = u_texel;',
+    '  vec2 b = (floor(sp) + 0.5) * t;',
+    '  vec3 c  = texture2D(u_tex, b).rgb;',
+    '  vec3 n  = texture2D(u_tex, b + vec2(0.0, -t.y)).rgb;',
+    '  vec3 s  = texture2D(u_tex, b + vec2(0.0,  t.y)).rgb;',
+    '  vec3 w  = texture2D(u_tex, b + vec2(-t.x, 0.0)).rgb;',
+    '  vec3 e  = texture2D(u_tex, b + vec2( t.x, 0.0)).rgb;',
+    '  vec3 nw = texture2D(u_tex, b + vec2(-t.x, -t.y)).rgb;',
+    '  vec3 ne = texture2D(u_tex, b + vec2( t.x, -t.y)).rgb;',
+    '  vec3 sw = texture2D(u_tex, b + vec2(-t.x,  t.y)).rgb;',
+    '  vec3 se = texture2D(u_tex, b + vec2( t.x,  t.y)).rgb;',
+    '  e0 = (nw == c) ? w : ((ne == c) ? e : c);',
+    '  e1 = (ne == c) ? e : ((nw == c) ? w : c);',
+    '  e2 = (sw == c) ? w : ((se == c) ? e : c);',
+    '  e3 = (se == c) ? e : ((sw == c) ? w : c);',
     '}',
     '',
-    '/* FSR 1.0 EASU 简化实现：沿边缘方向做定向拉伸采样，',
-    ' * 把阶梯状斜线重建成连续斜线。倍率 <1.5 时退化为普通双线性。 */',
-    'vec3 easu(vec2 uv) {',
-    '  if (u_fsr <= 0.0 || u_scaleNow < 1.5) {',
-    '    return texture2D(u_tex, uv).rgb;',
-    '  }',
+    '// AdvMAME2x: interpolates only on one-sided matches, giving smoother',
+    '// diagonal transitions while still keeping edges hard.',
+    'void advmame2xPixel(vec2 sp, out vec3 e0, out vec3 e1, out vec3 e2, out vec3 e3) {',
+    '  vec2 t = u_texel;',
+    '  vec2 b = (floor(sp) + 0.5) * t;',
+    '  vec3 c  = texture2D(u_tex, b).rgb;',
+    '  vec3 w  = texture2D(u_tex, b + vec2(-t.x, 0.0)).rgb;',
+    '  vec3 e  = texture2D(u_tex, b + vec2( t.x, 0.0)).rgb;',
+    '  vec3 nw = texture2D(u_tex, b + vec2(-t.x, -t.y)).rgb;',
+    '  vec3 ne = texture2D(u_tex, b + vec2( t.x, -t.y)).rgb;',
+    '  vec3 sw = texture2D(u_tex, b + vec2(-t.x,  t.y)).rgb;',
+    '  vec3 se = texture2D(u_tex, b + vec2( t.x,  t.y)).rgb;',
+    '  e0 = (nw == c && ne == w) ? (w + c) * 0.5',
+    '     : (nw == c)          ? w',
+    '     : (ne == c)          ? e',
+    '     :                      c;',
+    '  e1 = (ne == c && nw == e) ? (e + c) * 0.5',
+    '     : (ne == c)          ? e',
+    '     : (nw == c)          ? w',
+    '     :                      c;',
+    '  e2 = (sw == c && se == w) ? (w + c) * 0.5',
+    '     : (sw == c)          ? w',
+    '     : (se == c)          ? e',
+    '     :                      c;',
+    '  e3 = (se == c && sw == e) ? (e + c) * 0.5',
+    '     : (se == c)          ? e',
+    '     : (sw == c)          ? w',
+    '     :                      c;',
+    '}',
+    '',
+    '// Entry point: reconstruct at 2x then interpolate for arbitrary scale.',
+    'vec3 upscale(vec2 uv) {',
+    '  if (u_fsr <= 0.001) { return texture2D(u_tex, uv).rgb; }',
     '  vec2 sp = uv * vec2(u_srcW, u_srcH) - 0.5;',
-    '  vec2 f = fract(sp);',
-    '  vec2 base = (floor(sp) + 0.5) * u_texel;',
-    '',
-    '  vec3 c, n, s, w, e, nw, ne, sw, se;',
-    '  fetch3x3(base, c, n, s, w, e, nw, ne, sw, se);',
-    '',
-    '  vec3 lN = abs(c - n), lS = abs(c - s), lW = abs(c - w), lE = abs(c - e);',
-    '  float hEdge = dot(max(lN, lS), vec3(0.3333));',
-    '  float vEdge = dot(max(lW, lE), vec3(0.3333));',
-    '',
-    '  /* 边缘走向决定拉伸轴：水平边缘沿 x 拉，垂直边缘沿 y 拉 */',
-    '  vec2 strX = vec2(u_texel.x * 1.5 * clamp(hEdge, 0.0, 1.0) * u_fsr, 0.0);',
-    '  vec2 strY = vec2(0.0, u_texel.y * 1.5 * clamp(vEdge, 0.0, 1.0) * u_fsr);',
-    '',
-    '  vec3 t0 = texture2D(u_tex, base).rgb;',
-    '  vec3 acc = t0 * 0.5;',
-    '  acc += (texture2D(u_tex, base + strX - strY).rgb',
-    '        + texture2D(u_tex, base - strX + strY).rgb) * 0.15;',
-    '  acc += (texture2D(u_tex, base + strX + strY).rgb',
-    '        + texture2D(u_tex, base - strX - strY).rgb) * 0.1;',
-    '',
-    '  /* 置信度：平坦区域不改动，避免糊掉 */',
-    '  float conf = clamp(max(hEdge, vEdge) * 1.4, 0.0, 1.0) * u_fsr;',
-    '  return mix(texture2D(u_tex, uv).rgb, acc, conf);',
+    '  if (sp.x < -0.5 || sp.y < -0.5 || sp.x > u_srcW - 0.5 || sp.y > u_srcH - 0.5) {',
+    '    return vec3(0.0);',
+    '  }',
+    '  vec2 g = sp * 0.5 - 0.25;',
+    '  vec3 e0, e1, e2, e3;',
+    '  if (u_advmame > 0.5) { advmame2xPixel(g, e0, e1, e2, e3); }',
+    '  else                { scale2xPixel(g, e0, e1, e2, e3); }',
+    '  vec2 f = clamp(fract(sp * 0.5 - 0.25) * 2.0, 0.0, 1.0);',
+    '  vec3 top = mix(e0, e1, f.x);',
+    '  vec3 bot = mix(e2, e3, f.x);',
+    '  return mix(top, bot, f.y);',
     '}',
     '',
     'vec2 curve(vec2 uv) {',
@@ -112,7 +140,7 @@
     '}',
     '',
     'vec3 sampleRGB(vec2 uv) {',
-    '  vec3 c = easu(uv);',
+    '  vec3 c = upscale(uv);',
     '  if (u_chroma > 0.0) {',
     '    vec2 dir = uv - 0.5;',
     '    c.r = texture2D(u_tex, uv + dir * u_chroma).r;',
@@ -260,7 +288,7 @@
     this.u = {};
     var names = ['u_tex', 'u_texel', 'u_outH', 'u_curvature', 'u_scanline', 'u_vignette',
                  'u_chroma', 'u_sharpen', 'u_glow', 'u_saturation', 'u_contrast',
-                 'u_brightness', 'u_curved', 'u_fsr', 'u_srcW', 'u_srcH', 'u_scaleNow'];
+                 'u_brightness', 'u_curved', 'u_fsr', 'u_advmame', 'u_srcW', 'u_srcH', 'u_scaleNow'];
     for (var i = 0; i < names.length; i++) {
       this.u[names[i]] = gl.getUniformLocation(prog, names[i]);
     }
@@ -377,25 +405,15 @@
     st.height = ch2 + 'px';
 
     /* 绘图缓冲尺寸。
-     * FSR/EASU 需要 >=2 倍放大倍率才有效。当前 CSS 框只有 1.14 倍
-     * （640 源放到 728 框），EASU 会退化成双线性，等于白做。
-     * 解决办法：绘图缓冲按整数倍放大，渲染完由 GPU 双线性缩回 CSS 尺寸。
-     * 这样着色器始终在高倍率下工作，输出再平滑贴回屏幕。 */
+     * 必须等于「实际显示像素数」，一次成像，中间不做任何缩放。
+     *
+     * 之前的做法是渲染到 1280 再由 GPU 双线性缩到 728，
+     * 相当于把刚重建好的边缘又重新采样糊了一遍 ——
+     * 这正是「整数倍 2.00 开了也没效果」的原因。
+     * Scale2x 这类逐像素重建算法必须在最终分辨率上一次性输出。 */
     var dpr = global.devicePixelRatio || 1;
-    var s = this.settings;
-    var wantInt = (s && s.intScale) || 1;
-    /* 只在"框不够大"时用整数倍兜底；框本来就够大就按实际尺寸 */
-    var natScale = (cw2 * dpr) / iw;
-    var useInt = wantInt > 1 && natScale < wantInt;
-
-    var w, h;
-    if (useInt) {
-      w = Math.max(1, Math.round(iw * wantInt));
-      h = Math.max(1, Math.round(ih * wantInt));
-    } else {
-      w = Math.max(1, Math.round(cw2 * dpr));
-      h = Math.max(1, Math.round(ch2 * dpr));
-    }
+    var w = Math.max(1, Math.round(cw2 * dpr));
+    var h = Math.max(1, Math.round(ch2 * dpr));
 
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
@@ -551,6 +569,7 @@
     gl.uniform1f(this.u.u_brightness, s.brightness);
     gl.uniform1f(this.u.u_curved, s.curvature > 0.0001 ? 1 : 0);
     gl.uniform1f(this.u.u_fsr, s.fsr || 0);
+    gl.uniform1f(this.u.u_advmame, (s.advmame === undefined ? 1 : s.advmame) > 0.5 ? 1 : 0);
     gl.uniform1f(this.u.u_srcW, sw);
     gl.uniform1f(this.u.u_srcH, sh);
     gl.uniform1f(this.u.u_scaleNow, this.canvas.width / sw);
