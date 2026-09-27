@@ -64,7 +64,7 @@
     <script type="text/javascript" src="{{ url_for('static', filename='emularity/es6-promise.js') }}"></script>
     <script type="text/javascript" src="{{ url_for('static', filename='emularity/browserfs.min.js') }}"></script>
     <script type="text/javascript" src="{{ url_for('static', filename='emularity/loader.js') }}"></script>
-    <script type="text/javascript" src="{{ url_for('static', filename='js/hd-render.js') }}"></script>
+    <script type="text/javascript" src="{{ url_for('static', filename='js/hd-render.js') }}?v=hd7"></script>
     <script type="text/javascript">
         var emulator = new Emulator(document.querySelector("#canvas"),
             null,
@@ -102,6 +102,6 @@
             }
         }
     </script>
-    <script src="{{ url_for('static', filename='js/game.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/game.js') }}?v=hd7"></script>
 {% endblock %}
 

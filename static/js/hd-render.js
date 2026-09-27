@@ -214,6 +214,7 @@
       e.preventDefault();
       this.ok = false;
       if (this._raf) { cancelAnimationFrame(this._raf); this._raf = null; }
+      if (this._timer) { global.clearInterval(this._timer); this._timer = null; }
       this._fallback(true);
     }.bind(this), false);
 
@@ -222,12 +223,38 @@
       this._fallback(false);
     }.bind(this), false);
 
+    // 可见性切换时切换驱动方式（rAF ↔ 定时器）
+    global.document.addEventListener('visibilitychange', function () {
+      if (!this.ok) { return; }
+      if (global.document.hidden) {
+        if (this._raf) { cancelAnimationFrame(this._raf); this._raf = null; }
+        if (!this._timer) { this._timer = global.setInterval(this._loop, 66); }
+      } else {
+        if (this._timer) { global.clearInterval(this._timer); this._timer = null; }
+        this._raf = requestAnimationFrame(this._loop);
+      }
+    }.bind(this), false);
+
     this.gl = gl;
     this.canvas = canvas;
     this.container.appendChild(canvas);
     this.ok = true;
-    this._raf = requestAnimationFrame(this._loop);
+    this._start();
     return true;
+  };
+
+  /* 启动渲染循环。
+   * 不能只在 init 里调一次 requestAnimationFrame：页面处于后台/无头状态时
+   * rAF 根本不会触发，循环体一次都跑不起来。改为先判断可见性，
+   * 隐藏时直接用定时器启动。 */
+  HDRender.prototype._start = function () {
+    if (global.document && global.document.hidden) {
+      if (!this._timer) {
+        this._timer = global.setInterval(this._loop, 66);
+      }
+    } else {
+      this._raf = requestAnimationFrame(this._loop);
+    }
   };
 
   HDRender.prototype._fallback = function (lost) {
@@ -292,10 +319,18 @@
 
   HDRender.prototype._loop = function () {
     if (!this.ok) { return; }
-    this._raf = requestAnimationFrame(this._loop);
 
-    // 页面不可见时停止上传纹理，省 CPU/带宽
-    if (global.document && global.document.hidden) { return; }
+    // 双驱动：可见时用 rAF（省资源），页面隐藏时 rAF 完全不触发，
+    // 改用定时器兜底，否则无头/后台环境下永远不会渲染。
+    // 注意：这里只负责"挂上下一次驱动"，不能因为已有驱动就 return，
+    // 否则当前这一帧的渲染会被跳过（曾经踩过：纹理永远停在 0x0）。
+    if (global.document && global.document.hidden) {
+      if (!this._timer) {
+        this._timer = global.setInterval(this._loop, 66);
+      }
+    } else {
+      this._raf = requestAnimationFrame(this._loop);
+    }
 
     var s = this.settings;
     var active = this.enabled && s.preset !== 'off';
