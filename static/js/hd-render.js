@@ -350,9 +350,16 @@
     }
 
     var parentBox = this.container.getBoundingClientRect();
-    // 覆盖层坐标相对父容器
-    var x = Math.round(left - parentBox.left);
-    var y = Math.round(top - parentBox.top);
+    /* 覆盖层坐标基准。
+     * 非全屏时覆盖层是 position:absolute，坐标相对父容器；
+     * 全屏时覆盖层被 CSS 切成 position:fixed，坐标相对视口。
+     * 两种基准混用会导致覆盖层整体偏移，src 已隐藏时表现为全黑屏。 */
+    var ovCs = getComputedStyle(this.canvas);
+    var overlayIsFixed = ovCs.position === 'fixed';
+    var originX = overlayIsFixed ? 0 : parentBox.left;
+    var originY = overlayIsFixed ? 0 : parentBox.top;
+    var x = Math.round(left - originX);
+    var y = Math.round(top - originY);
     var cw2 = Math.max(1, Math.round(cw));
     var ch2 = Math.max(1, Math.round(ch));
 
