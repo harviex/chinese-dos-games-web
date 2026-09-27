@@ -14,13 +14,18 @@
 
   var PRESETS = {
     off:   { label: '关闭',   curvature: 0,     scanline: 0,     vignette: 0,    chroma: 0,      sharpen: 0,    glow: 0,    saturation: 1,    contrast: 1,     brightness: 0 },
-    hd:    { label: '纯净HD', curvature: 0,     scanline: 0,     vignette: 0,    chroma: 0,      sharpen: 0.55, glow: 0.10, saturation: 1.06, contrast: 1.05,  brightness: 0.01 },
-    crt:   { label: 'CRT',    curvature: 0.055, scanline: 0.14,  vignette: 0.28, chroma: 0.0016, sharpen: 0.30, glow: 0.28, saturation: 1.14, contrast: 1.08,  brightness: 0.02 },
-    crt_hi:{ label: '重CRT',  curvature: 0.090, scanline: 0.22,  vignette: 0.42, chroma: 0.0030, sharpen: 0.20, glow: 0.42, saturation: 1.22, contrast: 1.14,  brightness: 0.03 },
-    clean: { label: '柔和',   curvature: 0.025, scanline: 0.06,  vignette: 0.15, chroma: 0.0006, sharpen: 0.40, glow: 0.18, saturation: 1.10, contrast: 1.03,  brightness: 0.01 }
+    hd:    { label: '纯净HD', curvature: 0,     scanline: 0,     vignette: 0,    chroma: 0,      sharpen: 0.55, glow: 0.10, saturation: 1.06, contrast: 1.05,  brightness: 0.01, fsr: 0.85, scaleMode: 1, intScale: 2 },
+    crt:   { label: 'CRT',    curvature: 0.055, scanline: 0.14,  vignette: 0.28, chroma: 0.0016, sharpen: 0.30, glow: 0.28, saturation: 1.14, contrast: 1.08,  brightness: 0.02, fsr: 0.75, scaleMode: 1, intScale: 2 },
+    crt_hi:{ label: '重CRT',  curvature: 0.090, scanline: 0.22,  vignette: 0.42, chroma: 0.0030, sharpen: 0.20, glow: 0.42, saturation: 1.22, contrast: 1.14,  brightness: 0.03, fsr: 0.60, scaleMode: 1, intScale: 2 },
+    clean: { label: '柔和',   curvature: 0.025, scanline: 0.06,  vignette: 0.15, chroma: 0.0006, sharpen: 0.40, glow: 0.18, saturation: 1.10, contrast: 1.03,  brightness: 0.01, fsr: 0.90, scaleMode: 1, intScale: 2 },
+    fsr_max:{ label: '极限FSR', curvature: 0,     scanline: 0,     vignette: 0,    chroma: 0,      sharpen: 0.35, glow: 0.05, saturation: 1.04, contrast: 1.03,  brightness: 0.00, fsr: 1.00, scaleMode: 1, intScale: 3 }
   };
 
-  var TUNABLE = ['curvature', 'scanline', 'vignette', 'chroma', 'sharpen', 'glow', 'saturation', 'contrast', 'brightness'];
+  var offPreset = { curvature: 0, scanline: 0, vignette: 0, chroma: 0, sharpen: 0, glow: 0, saturation: 1, contrast: 1, brightness: 0, fsr: 0, scaleMode: 0, intScale: 2 };
+  PRESETS.off = { label: '关闭' };
+  for (var _k in offPreset) { PRESETS.off[_k] = offPreset[_k]; }
+
+  var TUNABLE = ['curvature', 'scanline', 'vignette', 'chroma', 'sharpen', 'glow', 'saturation', 'contrast', 'brightness', 'fsr', 'scaleMode', 'intScale'];
 
   var VERT = [
     'attribute vec2 a_pos;',
@@ -47,6 +52,57 @@
     'uniform float u_contrast;',
     'uniform float u_brightness;',
     'uniform float u_curved;',
+    'uniform float u_fsr;',           /* FSR 边缘自适应强度 0..1 */
+    'uniform float u_srcW;',           /* 源纹理像素宽 */
+    'uniform float u_srcH;',
+    'uniform float u_scaleNow;',       /* 实际放大倍率 */
+    '',
+    '/* 3x3 邻域采样，FSR 边缘方向推断用 */',
+    'void fetch3x3(vec2 uv, out vec3 c, out vec3 n, out vec3 s, out vec3 w, out vec3 e,',
+    '             out vec3 nw, out vec3 ne, out vec3 sw, out vec3 se) {',
+    '  c  = texture2D(u_tex, uv).rgb;',
+    '  n  = texture2D(u_tex, uv + vec2(0.0, -u_texel.y)).rgb;',
+    '  s  = texture2D(u_tex, uv + vec2(0.0,  u_texel.y)).rgb;',
+    '  w  = texture2D(u_tex, uv + vec2(-u_texel.x, 0.0)).rgb;',
+    '  e  = texture2D(u_tex, uv + vec2( u_texel.x, 0.0)).rgb;',
+    '  nw = texture2D(u_tex, uv + vec2(-u_texel.x, -u_texel.y)).rgb;',
+    '  ne = texture2D(u_tex, uv + vec2( u_texel.x, -u_texel.y)).rgb;',
+    '  sw = texture2D(u_tex, uv + vec2(-u_texel.x,  u_texel.y)).rgb;',
+    '  se = texture2D(u_tex, uv + vec2( u_texel.x,  u_texel.y)).rgb;',
+    '}',
+    '',
+    '/* FSR 1.0 EASU 简化实现：沿边缘方向做定向拉伸采样，',
+    ' * 把阶梯状斜线重建成连续斜线。倍率 <1.5 时退化为普通双线性。 */',
+    'vec3 easu(vec2 uv) {',
+    '  if (u_fsr <= 0.0 || u_scaleNow < 1.5) {',
+    '    return texture2D(u_tex, uv).rgb;',
+    '  }',
+    '  vec2 sp = uv * vec2(u_srcW, u_srcH) - 0.5;',
+    '  vec2 f = fract(sp);',
+    '  vec2 base = (floor(sp) + 0.5) * u_texel;',
+    '',
+    '  vec3 c, n, s, w, e, nw, ne, sw, se;',
+    '  fetch3x3(base, c, n, s, w, e, nw, ne, sw, se);',
+    '',
+    '  vec3 lN = abs(c - n), lS = abs(c - s), lW = abs(c - w), lE = abs(c - e);',
+    '  float hEdge = dot(max(lN, lS), vec3(0.3333));',
+    '  float vEdge = dot(max(lW, lE), vec3(0.3333));',
+    '',
+    '  /* 边缘走向决定拉伸轴：水平边缘沿 x 拉，垂直边缘沿 y 拉 */',
+    '  vec2 strX = vec2(u_texel.x * 1.5 * clamp(hEdge, 0.0, 1.0) * u_fsr, 0.0);',
+    '  vec2 strY = vec2(0.0, u_texel.y * 1.5 * clamp(vEdge, 0.0, 1.0) * u_fsr);',
+    '',
+    '  vec3 t0 = texture2D(u_tex, base).rgb;',
+    '  vec3 acc = t0 * 0.5;',
+    '  acc += (texture2D(u_tex, base + strX - strY).rgb',
+    '        + texture2D(u_tex, base - strX + strY).rgb) * 0.15;',
+    '  acc += (texture2D(u_tex, base + strX + strY).rgb',
+    '        + texture2D(u_tex, base - strX - strY).rgb) * 0.1;',
+    '',
+    '  /* 置信度：平坦区域不改动，避免糊掉 */',
+    '  float conf = clamp(max(hEdge, vEdge) * 1.4, 0.0, 1.0) * u_fsr;',
+    '  return mix(texture2D(u_tex, uv).rgb, acc, conf);',
+    '}',
     '',
     'vec2 curve(vec2 uv) {',
     '  uv = uv * 2.0 - 1.0;',
@@ -56,7 +112,7 @@
     '}',
     '',
     'vec3 sampleRGB(vec2 uv) {',
-    '  vec3 c = texture2D(u_tex, uv).rgb;',
+    '  vec3 c = easu(uv);',
     '  if (u_chroma > 0.0) {',
     '    vec2 dir = uv - 0.5;',
     '    c.r = texture2D(u_tex, uv + dir * u_chroma).r;',
@@ -204,7 +260,7 @@
     this.u = {};
     var names = ['u_tex', 'u_texel', 'u_outH', 'u_curvature', 'u_scanline', 'u_vignette',
                  'u_chroma', 'u_sharpen', 'u_glow', 'u_saturation', 'u_contrast',
-                 'u_brightness', 'u_curved'];
+                 'u_brightness', 'u_curved', 'u_fsr', 'u_srcW', 'u_srcH', 'u_scaleNow'];
     for (var i = 0; i < names.length; i++) {
       this.u[names[i]] = gl.getUniformLocation(prog, names[i]);
     }
@@ -306,10 +362,27 @@
     st.width = cw2 + 'px';
     st.height = ch2 + 'px';
 
-    // 绘图缓冲用设备像素，避免在缩放/Hidpi 下被拉伸而模糊
+    /* 绘图缓冲尺寸。
+     * FSR/EASU 需要 >=2 倍放大倍率才有效。当前 CSS 框只有 1.14 倍
+     * （640 源放到 728 框），EASU 会退化成双线性，等于白做。
+     * 解决办法：绘图缓冲按整数倍放大，渲染完由 GPU 双线性缩回 CSS 尺寸。
+     * 这样着色器始终在高倍率下工作，输出再平滑贴回屏幕。 */
     var dpr = global.devicePixelRatio || 1;
-    var w = Math.max(1, Math.round(cw2 * dpr));
-    var h = Math.max(1, Math.round(ch2 * dpr));
+    var s = this.settings;
+    var wantInt = (s && s.intScale) || 1;
+    /* 只在"框不够大"时用整数倍兜底；框本来就够大就按实际尺寸 */
+    var natScale = (cw2 * dpr) / iw;
+    var useInt = wantInt > 1 && natScale < wantInt;
+
+    var w, h;
+    if (useInt) {
+      w = Math.max(1, Math.round(iw * wantInt));
+      h = Math.max(1, Math.round(ih * wantInt));
+    } else {
+      w = Math.max(1, Math.round(cw2 * dpr));
+      h = Math.max(1, Math.round(ch2 * dpr));
+    }
+
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;
@@ -368,7 +441,7 @@
 
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     gl.uniform2f(this.u.u_texel, 1 / sw, 1 / sh);
-    gl.uniform1f(this.u.u_outH, this.canvas.height);
+    gl.uniform1f(this.u.u_outH, this.src.height * (this.canvas.width / sw));
     gl.uniform1f(this.u.u_curvature, s.curvature);
     gl.uniform1f(this.u.u_scanline, s.scanline);
     gl.uniform1f(this.u.u_vignette, s.vignette);
@@ -379,6 +452,10 @@
     gl.uniform1f(this.u.u_contrast, s.contrast);
     gl.uniform1f(this.u.u_brightness, s.brightness);
     gl.uniform1f(this.u.u_curved, s.curvature > 0.0001 ? 1 : 0);
+    gl.uniform1f(this.u.u_fsr, s.fsr || 0);
+    gl.uniform1f(this.u.u_srcW, sw);
+    gl.uniform1f(this.u.u_srcH, sh);
+    gl.uniform1f(this.u.u_scaleNow, this.canvas.width / sw);
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   };

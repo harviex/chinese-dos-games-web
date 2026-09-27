@@ -17,8 +17,10 @@ function htmlFullscreen() {
 (function () {
   'use strict';
 
-  var PALETTE = ['off', 'hd', 'clean', 'crt', 'crt_hi'];
+  var PALETTE = ['off', 'hd', 'clean', 'crt', 'crt_hi', 'fsr_max'];
   var SLIDERS = [
+    { key: 'fsr',         label: 'FSR超分', min: 0,    max: 1,    step: 0.01  },
+    { key: 'intScale',    label: '整数倍',  min: 1,    max: 4,    step: 1     },
     { key: 'curvature',   label: '曲面',   min: 0,    max: 0.15, step: 0.001 },
     { key: 'scanline',    label: '扫描线', min: 0,    max: 0.4,  step: 0.005 },
     { key: 'vignette',    label: '暗角',   min: 0,    max: 0.7,  step: 0.01  },
