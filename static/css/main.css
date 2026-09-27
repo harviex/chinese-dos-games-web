@@ -156,6 +156,21 @@ canvas.hd-overlay.html-fullscreen {
     width: 500px;
 }
 
+/* 原生全屏目标：共同父容器。
+ * 覆盖层与原画布都是它的后代，全屏时都会渲染；
+ * 若容器未铺满视口，边缘会出现残影。 */
+#screen_container:fullscreen,
+#screen_container:-webkit-full-screen,
+#screen_container:-moz-full-screen {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #000;
+    z-index: 2000;
+    overflow: hidden;
+}
+
 .html-fullscreen {
     position: fixed;
     left: 0px;

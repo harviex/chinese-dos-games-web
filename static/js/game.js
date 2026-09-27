@@ -13,6 +13,56 @@ function htmlFullscreen() {
     if (window.hd && window.hd.ok) { window.hd._syncSize(); }
 }
 
+/* 原生全屏与画质覆盖层的兼容处理。
+ *
+ * 问题：覆盖层是原画布的兄弟节点（都在 #screen_container 里），
+ * 而浏览器原生全屏只渲染全屏元素「及其后代」，兄弟节点不渲染。
+ * 原画布此时又被覆盖层隐藏(opacity:0)，于是全屏后一片黑。
+ *
+ * 解法：把原生全屏的目标从「原画布」换成「共同父容器 #screen_container」。
+ * 容器同时包含原画布和覆盖层，两者都是全屏元素的后代，都能正常渲染，
+ * 保留真正的沉浸式全屏和 ESC 退出。
+ *
+ * 覆盖层在容器内按 contain 方式贴合原画布可见区，由 _syncSize 完成。 */
+function nativeFullscreen() {
+    var src = document.getElementById('canvas');
+    var container = document.getElementById('screen_container');
+    if (!src) { return; }
+
+    /* 画质层可用时，全屏目标换成共同父容器 */
+    var target = (window.hd && window.hd.ok && container) ? container : src;
+
+    var req = target.requestFullscreen || target.webkitRequestFullscreen ||
+              target.mozRequestFullScreen || target.msRequestFullscreen;
+    if (!req) { return; }
+
+    var r = req.call(target);
+    if (r && typeof r.catch === 'function') {
+        r.catch(function () { htmlFullscreen(); });  /* 被拒时回落 CSS 全屏 */
+    }
+}
+
+/* 原生全屏进入/退出时同步覆盖层几何。
+ * 容器成为全屏元素后尺寸变为整个视口，覆盖层需重新贴合原画布。 */
+(function () {
+    'use strict';
+    ['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange'].forEach(function (ev) {
+        document.addEventListener(ev, function () {
+            var el = document.fullscreenElement || document.webkitFullscreenElement;
+            if (!el) { return; }
+            var src = document.getElementById('canvas');
+            var btn = document.getElementById('exit_button');
+            if (btn) { btn.classList.add('exit_fullscreen_show'); }
+            /* 标记真实全屏态，让 _syncSize 走 contain 分支 */
+            if (src) { src.classList.add('html-fullscreen'); }
+            if (window.hd && window.hd.ok) {
+                window.hd.canvas.classList.add('html-fullscreen');
+                window.hd._syncSize();
+            }
+        });
+    });
+})();
+
 /* 画质面板：在游戏页注入一个可折叠的控制条 */
 (function () {
   'use strict';
