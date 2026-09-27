@@ -270,15 +270,19 @@
     // 覆盖层坐标相对父容器
     var x = Math.round(left - parentBox.left);
     var y = Math.round(top - parentBox.top);
-    var w = Math.max(1, Math.round(cw));
-    var h = Math.max(1, Math.round(ch));
+    var cw2 = Math.max(1, Math.round(cw));
+    var ch2 = Math.max(1, Math.round(ch));
 
     var st = this.canvas.style;
     st.left = x + 'px';
     st.top = y + 'px';
-    st.width = w + 'px';
-    st.height = h + 'px';
+    st.width = cw2 + 'px';
+    st.height = ch2 + 'px';
 
+    // 绘图缓冲用设备像素，避免在缩放/Hidpi 下被拉伸而模糊
+    var dpr = global.devicePixelRatio || 1;
+    var w = Math.max(1, Math.round(cw2 * dpr));
+    var h = Math.max(1, Math.round(ch2 * dpr));
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;
