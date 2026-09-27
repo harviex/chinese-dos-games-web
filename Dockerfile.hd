@@ -1,0 +1,9 @@
+FROM firezmc/dosgame-web-docker:v3.9.6
+
+# 覆盖为我们的画质增强版源码（应用根目录由基础镜像 WORKDIR 决定）
+COPY app.py          /chinese-dos-games-web/app.py
+COPY game_infos.py   /chinese-dos-games-web/game_infos.py
+COPY templates/      /chinese-dos-games-web/templates/
+COPY static/js/hd-render.js /chinese-dos-games-web/static/js/hd-render.js
+COPY static/js/game.js     /chinese-dos-games-web/static/js/game.js
+COPY static/css/main.css   /chinese-dos-games-web/static/css/main.css

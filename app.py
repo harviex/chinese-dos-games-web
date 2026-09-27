@@ -49,4 +49,6 @@ def emularity_logo(identifier):
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # 必须监听 0.0.0.0:8090，否则容器外部无法访问（上游此处为 debug=True，
+    # 只绑定 127.0.0.1:5000，是上游仓库自身的 bug）
+    app.run(debug=True, host='0.0.0.0', port=8090)
