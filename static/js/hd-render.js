@@ -266,6 +266,13 @@
     }
     gl.uniform1i(this.u.u_tex, 0);
 
+    /* 帧缓存统计（供调试面板显示） */
+    this.skipped = 0;
+    this.dirty = null;
+    this.dirtyRatio = 0;
+    this._frameCheck = true;
+    this._hotFrames = 0;
+
     canvas.addEventListener('webglcontextlost', function (e) {
       e.preventDefault();
       this.ok = false;
@@ -397,6 +404,69 @@
     return true;
   };
 
+  /* 帧变化检测 + 脏矩形。
+   *
+   * 实测回合制游戏相邻帧仅有 0.01% 像素变化，绝大部分时间完全静止。
+   * 若每帧都重算：① 重复对同一画面做同样计算 ② 采样误差逐帧累积，
+   * 表现为画面持续微抖（用户感知为「只是变亮了」）。
+   *
+   * 这里做一次全分辨率读回并逐字节早退比对，得到脏矩形：
+   * - 无变化：完全跳过重绘，屏幕上保持上一次高质量结果，完全静止
+   * - 有变化：照常重绘（着色器本身很便宜），脏矩形供后续增量/AI 推理使用
+   */
+  HDRender.prototype._detectChange = function () {
+    var src = this.src;
+    if (!this._probe) {
+      this._probe = global.document.createElement('canvas');
+      this._probeCtx = this._probe.getContext('2d', { willReadFrequently: true });
+    }
+    var p = this._probe;
+    if (p.width !== src.width || p.height !== src.height) {
+      p.width = src.width;
+      p.height = src.height;
+      this._prevPix = null;
+    }
+
+    try {
+      this._probeCtx.drawImage(src, 0, 0);
+      var cur = this._probeCtx.getImageData(0, 0, p.width, p.height).data;
+    } catch (e) {
+      return { changed: true, rect: null };   /* 读回失败：保守当作有变化 */
+    }
+
+    var prev = this._prevPix;
+    if (!prev || prev.length !== cur.length) {
+      this._prevPix = new Uint8Array(cur);
+      return { changed: true, rect: null };
+    }
+
+    /* 逐字节早退比对，同时累计脏矩形边界 */
+    var n = cur.length;
+    var minX = 1e9, minY = 1e9, maxX = -1, maxY = -1;
+    var diff = 0;
+    for (var i = 0; i < n; i++) {
+      if (cur[i] !== prev[i]) {
+        diff++;
+        var px = (i >> 2) % p.width;
+        var py = (i >> 2) / p.width | 0;
+        if (px < minX) minX = px;
+        if (px > maxX) maxX = px;
+        if (py < minY) minY = py;
+        if (py > maxY) maxY = py;
+      }
+    }
+
+    if (diff === 0) {
+      return { changed: false, rect: null };
+    }
+    prev.set(cur);
+    return {
+      changed: true,
+      rect: { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 },
+      ratio: diff / n
+    };
+  };
+
   HDRender.prototype._loop = function () {
     if (!this.ok) { return; }
 
@@ -431,6 +501,27 @@
       this.src.style.opacity = '1';
       this.canvas.style.display = 'none';
       return;
+    }
+
+    /* 帧变化检测：静止时跳过重绘，消除逐帧采样误差累积导致的微抖。
+     * 安全阀：连续 N 帧都在变（如动作场景/过场动画）就停止检测、
+     * 恢复每帧重绘，避免白付检测开销却拿不到收益。 */
+    if (this._frameCheck) {
+      if (this._hotFrames === undefined) { this._hotFrames = 0; }
+      if (this._hotFrames < 90) {
+        var ch = this._detectChange();
+        if (ch.rect) {
+          this.dirty = ch.rect;
+          this.dirtyRatio = ch.ratio;
+          if (ch.ratio > 0.25) { this._hotFrames++; } else { this._hotFrames = 0; }
+        } else if (ch.changed) {
+          this.dirty = null;
+          this._hotFrames = 0;
+        } else {
+          this.skipped++;
+          return;                 /* 画面未变：保持上一帧结果，完全静止 */
+        }
+      }
     }
 
     var gl = this.gl;
@@ -486,6 +577,14 @@
     this.enabled = !!on;
     this.settings.enabled = this.enabled;
     save(this.settings);
+  };
+
+  /* 静态帧缓存开关。关闭后每帧都重绘（用于对比效果或遇到问题时排查）。 */
+  HDRender.prototype.setFrameCache = function (on) {
+    this._frameCheck = !!on;
+    this._hotFrames = 0;
+    this._prevPix = null;
+    this.skipped = 0;
   };
 
   HDRender.prototype.toggleFullscreen = function () {
