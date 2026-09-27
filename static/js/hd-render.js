@@ -118,10 +118,10 @@
     '// Entry point: reconstruct at 2x then interpolate for arbitrary scale.',
     'vec3 upscale(vec2 uv) {',
     '  if (u_fsr <= 0.001) { return texture2D(u_tex, uv).rgb; }',
+    '  // 越界时夹回边缘而非返回 0：返回 0 会静默把该像素变成纯黑，',
+    '  // 在色差/曲面等偏移采样下会把整片画面打坏。',
+    '  uv = clamp(uv, vec2(0.0), vec2(1.0));',
     '  vec2 sp = uv * vec2(u_srcW, u_srcH) - 0.5;',
-    '  if (sp.x < -0.5 || sp.y < -0.5 || sp.x > u_srcW - 0.5 || sp.y > u_srcH - 0.5) {',
-    '    return vec3(0.0);',
-    '  }',
     '  vec2 g = sp * 0.5 - 0.25;',
     '  vec3 e0, e1, e2, e3;',
     '  if (u_advmame > 0.5) { advmame2xPixel(g, e0, e1, e2, e3); }',
@@ -143,8 +143,13 @@
     '  vec3 c = upscale(uv);',
     '  if (u_chroma > 0.0) {',
     '    vec2 dir = uv - 0.5;',
-    '    c.r = texture2D(u_tex, uv + dir * u_chroma).r;',
-    '    c.b = texture2D(u_tex, uv - dir * u_chroma).b;',
+    '    // 三通道必须同源：若 R/B 直接取原纹理、G 取重建结果，',
+    '    // 三通道采样位置不一致，边缘互相错位，画面偏品红。',
+    '    // 偏移后越界时 upscale 返回 0，会把该通道整片清零，',
+    '    // 所以只取 R/B 分量并夹回，避免毁掉整帧。',
+    '    vec3 cr = upscale(clamp(uv + dir * u_chroma, 0.0, 1.0));',
+    '    vec3 cb = upscale(clamp(uv - dir * u_chroma, 0.0, 1.0));',
+    '    return vec3(cr.r, c.g, cb.b);',
     '  }',
     '  return c;',
     '}',
@@ -516,6 +521,14 @@
 
     // 尺寸未就绪（游戏还没启动、canvas 为 0×0）时不要隐藏原画布，否则黑屏
     if (!this._syncSize()) {
+      this.src.style.opacity = '1';
+      this.canvas.style.display = 'none';
+      return;
+    }
+
+    /* 安全网：一旦着色器/上下文出问题，立即回落原画布。
+     * 宁可没有画质，也绝不能让用户看到黑屏。 */
+    if (!this.ok) {
       this.src.style.opacity = '1';
       this.canvas.style.display = 'none';
       return;
